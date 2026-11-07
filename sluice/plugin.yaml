@@ -1,0 +1,40 @@
+name: sluice
+label: Sluice
+version: 0.1.0
+manifest_version: 2
+kind: backend
+author: Peter Stephen
+license: MIT
+homepage: https://github.com/orjinameh/airlock
+description: >
+  Runs the agent's commands and file changes in a staged copy of your workspace, then lets you
+  review the result hunk by hunk and apply only what you approve. Calls a copy cannot contain
+  (network writes, git push, installs, writes outside the workspace) are held for approval and
+  labelled not contained. Select it with `hermes config set terminal.backend sluice`.
+requires_hermes: ">=0.22.6"
+platforms: [linux, macos]
+tags: [terminal, review, diff, safety]
+provides_tools: []
+provides_hooks: [pre_tool_call]
+capabilities: []
+config_schema:
+  copy_git:
+    type: bool
+    default: true
+    label: Copy .git into the stage
+    description: "Lets git status and git diff work inside the stage. The real .git is never changed."
+  max_file_mb:
+    type: int
+    default: 25
+    label: Largest file copied (MB)
+    description: "Files above this size are not copied into the stage and are listed as skipped."
+  max_workspace_mb:
+    type: int
+    default: 1024
+    label: Largest workspace (MB)
+    description: "Refuse to stage a workspace bigger than this."
+  allow_paths:
+    type: list
+    default: []
+    label: Paths outside the workspace that never need approval
+    description: "For example [\"/tmp\"]. Writes there are still not contained, only not held."
