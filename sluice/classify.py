@@ -31,6 +31,15 @@ _INSTALL = {
 _NET_WRITE_TOOLS = {"scp", "sftp", "ftp", "nc", "ncat", "netcat", "telnet", "rsync", "ssh", "mosh"}
 _WRITERS = {"rm", "rmdir", "mv", "cp", "touch", "mkdir", "chmod", "chown", "ln", "tee", "truncate", "install",
             "shred", "unlink"}
+_PUBLISH = {
+    "npm": {"publish", "unpublish", "deprecate"}, "pnpm": {"publish"}, "yarn": {"publish", "npm"},
+    "twine": {"upload"}, "cargo": {"publish", "yank"}, "gem": {"push"}, "docker": {"push", "login"},
+    "podman": {"push"}, "kubectl": {"apply", "delete", "create", "patch", "replace", "rollout", "scale"},
+    "helm": {"install", "upgrade", "uninstall", "rollback"}, "terraform": {"apply", "destroy"},
+    "tofu": {"apply", "destroy"}, "flyctl": {"deploy"}, "fly": {"deploy"}, "vercel": {"deploy", "--prod"},
+    "netlify": {"deploy"}, "heroku": {"push"}, "aws": {"s3", "ec2", "lambda", "iam", "cloudformation"},
+    "gcloud": {"deploy", "compute", "run", "functions", "storage"}, "az": {"deploy", "vm", "storage"},
+}
 _SAFE_SINKS = {"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty", "/dev/zero"}
 
 
@@ -80,6 +89,8 @@ def classify_command(command: str, root: str, allow: Iterable[str] = (), home: O
         if f not in found:
             found.append(f)
 
+    if re.search(r"\b(curl|wget)\b[^|;&\n]*\|\s*(sudo\s+)?(ba|z|da)?sh\b", command):
+        add("install", "downloads a script and runs it")
     for m in _REDIRECT.finditer(command):
         tgt = m.group(1).strip("'\"")
         if _outside(tgt, root, home, allow):
@@ -134,6 +145,10 @@ def classify_command(command: str, root: str, allow: Iterable[str] = (), home: O
             if re.match(r"(pr|issue|release|repo|gist|workflow)\s+(create|merge|close|delete|edit|comment|run)", sub) \
                or (sub.startswith("api") and re.search(r"-X\s*(POST|PUT|PATCH|DELETE)|--method\s+(POST|PUT|PATCH|DELETE)|-f\s|-F\s", " ".join(args))):
                 add("network", f"changes GitHub state with gh {sub}")
+        # publish and deploy
+        pv = _PUBLISH.get(cmd)
+        if pv and any(a in pv for a in args[:3]):
+            add("network", f"publishes or changes a remote system with {cmd} {next((a for a in args[:3] if a in pv), '')}".strip())
         # installs
         verbs = _INSTALL.get(cmd)
         if cmd == "python" or cmd == "python3":

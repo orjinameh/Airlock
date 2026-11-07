@@ -194,6 +194,8 @@ def apply(st: Stage, diff: Diff, selected: Optional[Iterable[int]] = None) -> Re
             res.files_changed.append(path)
         except Conflict as exc:
             res.conflicts.append((path, str(exc)))
+        except OSError as exc:   # disk full, permission denied: report it, keep going with other files
+            res.conflicts.append((path, f"could not write: {exc.strerror or exc}"))
     _rebase(st, touched, removed_paths)
     return res
 

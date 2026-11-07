@@ -6,6 +6,7 @@ Pure standard library plus the `git` binary (optional). Nothing here imports Her
 
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import hashlib
 import json
@@ -347,10 +348,67 @@ def discard(st: Stage) -> None:
         pass
 
 
+STALE_DAYS = 14
+
+
+def prune_stale(keep: Optional[str] = None, days: int = STALE_DAYS) -> int:
+    """Remove stages nobody has touched for `days` days. Returns how many were removed."""
+    base = state_root()
+    removed = 0
+    cutoff = time.time() - days * 86400
+    try:
+        entries = list(base.iterdir())
+    except OSError:
+        return 0
+    for d in entries:
+        if not d.is_dir() or d.name == keep:
+            continue
+        try:
+            newest = max([d.stat().st_mtime] + [p.stat().st_mtime for p in (d / "meta.json", d / "log.jsonl") if p.exists()])
+        except OSError:
+            continue
+        if newest < cutoff:
+            shutil.rmtree(d, ignore_errors=True)
+            removed += 1
+    return removed
+
+
+@contextlib.contextmanager
+def locked(st: Stage):
+    """Exclusive lock on a stage so two applies (two sessions) cannot interleave."""
+    try:
+        import fcntl
+    except ImportError:   # not posix: no locking available
+        yield
+        return
+    fd = os.open(str(st.dir / ".lock"), os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
+
+def drift(st: Stage) -> List[str]:
+    """Files whose real copy no longer matches the baseline (you or something else changed them since)."""
+    out = []
+    for rel, e in st.manifest.items():
+        cur = entry_for(os.path.join(st.root, rel))
+        if cur is None or cur.kind != e.kind or cur.sha != e.sha or cur.target != e.target:
+            out.append(rel)
+    return out
+
+
 def open_or_create(root: str, **kw) -> Stage:
     """Reuse the stage for this workspace if one is pending, else take a fresh copy."""
     st = load(root)
     if st is not None and os.path.realpath(st.root) == os.path.realpath(root):
         mark_current(st)
+        prune_stale(keep=st.dir.name)
         return st
-    return create(root, **kw)
+    st = create(root, **kw)
+    prune_stale(keep=st.dir.name)
+    return st

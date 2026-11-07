@@ -14,6 +14,7 @@ HELP = (
     "  /sluice diff [path]   show the changes, numbered\n"
     "  /sluice apply all     apply everything shown\n"
     "  /sluice apply 1,3-5   apply only those numbered changes\n"
+    "  /sluice apply src/a.py   apply every change in that file\n"
     "  /sluice apply 1,3 --discard-rest   apply those, drop the others\n"
     "  /sluice discard       throw the staged copy away\n"
     "  /sluice log           commands run and actions held as not contained"
@@ -22,14 +23,17 @@ MAX_CHARS = 3800
 MAX_HUNK_LINES = 30
 
 
-def _parse_selection(text: str, valid: Set[int]) -> Set[int]:
+def _parse_selection(text: str, valid: Set[int], d: Optional[diffing.Diff] = None) -> Set[int]:
     chosen: Set[int] = set()
     for part in re.split(r"[,\s]+", text.strip()):
         if not part:
             continue
+        if d is not None and part in d.files:
+            chosen.update(u.id for u in d.units if u.path == part)   # a file name selects all its changes
+            continue
         m = re.fullmatch(r"(\d+)(?:-(\d+))?", part)
         if not m:
-            raise ValueError(f"cannot read {part!r}; use numbers like 1,3-5 or all")
+            raise ValueError(f"cannot read {part!r}; use numbers like 1,3-5, a changed file name, or all")
         lo = int(m.group(1))
         hi = int(m.group(2) or lo)
         for n in range(lo, hi + 1):
@@ -55,6 +59,10 @@ def render_status(st: stage_mod.Stage, d: diffing.Diff) -> str:
         lines.append(f"Held as not contained: {len(held)} (see /sluice log)")
     if st.skipped:
         lines.append(f"Not copied into the stage: {len(st.skipped)} (large files or outside symlinks)")
+    moved = stage_mod.drift(st)
+    if moved:
+        lines.append(f"Changed in your workspace since the stage was taken: {len(moved)} file(s). "
+                     "Applying a change to one of those may conflict.")
     if d.units:
         lines.append("Run /sluice diff to review.")
     return "\n".join(lines)
@@ -148,10 +156,13 @@ def handle(raw: str = "") -> str:
                     "then apply what you see.")
         try:
             chosen = {u.id for u in d.units} if sel_text.lower() == "all" else \
-                _parse_selection(sel_text, {u.id for u in d.units})
+                _parse_selection(sel_text, {u.id for u in d.units}, d)
         except ValueError as exc:
             return f"Sluice: {exc}"
-        res = applying.apply(st, d, chosen)
+        with stage_mod.locked(st):
+            if not os.path.isdir(st.root):
+                return f"Sluice: the workspace {st.root} no longer exists. Nothing was applied."
+            res = applying.apply(st, d, chosen)
         lines = [f"Sluice: applied {len(res.applied)} change(s) to {len(res.files_changed)} file(s)."]
         for path, why in res.conflicts:
             lines.append(f"CONFLICT {path}: {why}. Left unchanged.")
