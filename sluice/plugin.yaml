@@ -1,6 +1,6 @@
 name: sluice
 label: Sluice
-version: 1.0.0
+version: 1.0.1
 manifest_version: 2
 kind: backend
 author: Peter Stephen
